@@ -1,72 +1,55 @@
 #include <Arduino.h>
-#include <arduinoFFT.h>
 
-#define DATA_BUF_SIZE (32)
-#define SAMPLE_RATE (25000) 
+#define BAUD_RATE (115200)
+#define SAMPLE_RATE (4096)
 
-DmacDescriptor dmac_section_desc[1] __attribute__ ((aligned (8)));
-DmacDescriptor dmac_section_desc_wrb[1] __attribute__ ((aligned (8)));
-DmacDescriptor dmac_desc[1] __attribute__ ((aligned (8)));
+volatile unsigned long last_fetch;
+volatile unsigned long elapsed;
 
-DmacDescriptor *adc_dmac_desc[2] = { &dmac_section_desc[0], &dmac_desc[0] };
-
-uint16_t adc_buf[DATA_BUF_SIZE << 1];
-volatile uint16_t *adc_buf_active = &adc_buf[DATA_BUF_SIZE];
-
-
-void dmac_handler(void) {
-  __disable_irq();
-  if (DMAC->Channel[0].CHINTFLAG.bit.TCMPL) {
-    DMAC->Channel[0].CHINTFLAG.bit.TCMPL = 1;
-    adc_buf_active = adc_buf_active == adc_buf ? &adc_buf[DATA_BUF_SIZE] : adc_buf;
+void TC0_Handler(void) {
+  NVIC_DisableIRQ(TC0_IRQn);
+  if (TC0->COUNT16.INTFLAG.bit.MC0) {
+    TC0->COUNT16.INTFLAG.bit.MC0 = 1;
+    elapsed = micros() - last_fetch;
+    last_fetch = micros();
   }
-  __enable_irq();
+  NVIC_EnableIRQ(TC0_IRQn);
 }
 
-void init_PORT() {
-  //ADC (AIN0), PIN (PA02), Arduino (A0)
-  PORT->Group[PORTA].PMUX[2 >> 1].bit.PMUXE = 1;
-  PORT->Group[PORTA].PINCFG[2].bit.PMUXEN = 1;
+void init_GCLK() {
+  GCLK->PCHCTRL[TC0_GCLK_ID].reg = GCLK_PCHCTRL_CHEN | GCLK_PCHCTRL_GEN_GCLK0;
 }
 
+void init_TC() {
+  TC0->COUNT16.CTRLA.bit.ENABLE = 0;
+  while(TC0->COUNT16.SYNCBUSY.bit.ENABLE);
+  TC0->COUNT16.WAVE.bit.WAVEGEN = TC_WAVE_WAVEGEN_MFRQ;
+  TC0->COUNT16.CTRLA.bit.ENABLE = 1;
+  while(TC0->COUNT16.SYNCBUSY.bit.ENABLE);
+  TC0->COUNT16.INTENSET.bit.MC0 = 1;
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-const uint16_t number_of_samples = 1 << 12;
-const float sampling_frequency = 5000;
-const uint8_t amplitude = 100;
-
-float vReal[number_of_samples];
-float vImag[number_of_samples];
-
-ArduinoFFT<float> fft(vReal, vImag, number_of_samples, sampling_frequency);
-
-void fourier(void) {
-    time_t start = micros();
-    fft.windowing(FFTWindow::Hamming, FFTDirection::Forward);
-    fft.compute(FFTDirection::Forward);
-    fft.complexToMagnitude();
-    time_t elapsed = micros() - start;
-    Serial.println(elapsed);
+void set_sampling_rate(uint32_t sampling_rate) {
+  uint32_t timer_delay = SystemCoreClock / sampling_rate - 1;
+  TC0->COUNT16.CTRLA.bit.ENABLE = 0;
+  while(TC0->COUNT16.SYNCBUSY.bit.ENABLE);
+  TC0->COUNT16.CC[0].reg = timer_delay;
+  while(TC0->COUNT16.SYNCBUSY.bit.CC0);
+  TC0->COUNT16.CTRLA.bit.ENABLE = 1;
+  while(TC0->COUNT16.SYNCBUSY.bit.ENABLE);
 }
 
 void setup(void) {
-    Serial.begin(115200);
-    delay(10000);
-    fourier();
+  Serial.begin(BAUD_RATE);
+  while(!Serial);
+  init_GCLK();
+  delay(100);
+  init_TC();
+  set_sampling_rate(SAMPLE_RATE);
+  NVIC_EnableIRQ(TC0_IRQn);
 }
 
 void loop(void) {
-    
+  delay(1000);
+  Serial.printf("%lu\n", elapsed);
 }
