@@ -16,7 +16,7 @@ void TC0_Handler(void) {
   NVIC_EnableIRQ(TC0_IRQn);
 }
 
-void init_GCLK(void) {
+void init_CLK(void) {
   MCLK->APBAMASK.reg |= MCLK_APBAMASK_TC0;
   MCLK->APBBMASK.reg |= MCLK_APBBMASK_EVSYS;
   MCLK->APBDMASK.reg |= MCLK_APBDMASK_ADC0;
@@ -63,6 +63,9 @@ void ADC0_1_Handler(void) {
 }
 
 void init_ADC(void) {
+  PORT->Group[PORTA].PMUX[PIN_PA02 >> 1].bit.PMUXE = 0x01;
+  PORT->Group[PORTA].PINCFG[PIN_PA02].reg = PORT_PINCFG_PMUXEN;
+  
   ADC0->EVCTRL.bit.STARTEI = 1;
   ADC0->EVCTRL.bit.RESRDYEO = 1;
   ADC0->INPUTCTRL.bit.MUXNEG = ADC_INPUTCTRL_MUXNEG_GND_Val;
@@ -81,7 +84,7 @@ void init_ADC(void) {
 void setup(void) {
   Serial.begin(BAUD_RATE);
   while(!Serial);
-  init_GCLK();
+  init_CLK();
   init_TC();
   set_sampling_rate(SAMPLING_RATE);
   init_EVSYS();
@@ -90,5 +93,7 @@ void setup(void) {
 
 void loop(void) {
   delay(1000);
-  Serial.printf("%lu\n", elapsed);
+  //Serial.printf("%lu\n", elapsed);
+  uint16_t result = ADC0->RESULT.bit.RESULT;
+  Serial.printf("%lu\n", result);
 }
